@@ -1,0 +1,1778 @@
+import re
+import numpy as np
+import glob
+import random
+import matplotlib.pyplot as plt
+
+filenames_posi = []
+filenames_posi = glob.glob("trainingdata(positive)/*")
+filenames_nega = []
+filenames_nega = glob.glob("trainingdata(negative)/*")
+
+print(filenames_posi)
+print(len(filenames_posi))
+print(filenames_nega)
+print(len(filenames_nega))
+
+#ここからはじまる．
+import mysql.connector as mydb
+
+# コネクションの作成
+conn = mydb.connect(
+    host='localhost',
+    port='3306',
+    user='3a16057',
+    password='TuWqAc4#97',
+    database='meropsrefs01'
+)
+
+# DB操作用にカーソルを作成
+cur = conn.cursor()
+
+#cur = cur.execute(buffered=True)
+cur.reset()
+
+#ライブラリのインポート
+import pandas as pd
+from urllib.request import urlopen
+import numpy as np
+from lxml import etree
+
+uid_eg = 'P78365'
+
+def aaseq_from_uid(uid, substrate_turn, index):
+    df = pd.DataFrame(np.arange(3).reshape(1, 3), columns=['uniprotKB_accession', 'function', 'sequence'], index=['protease'+str(substrate_turn)+'_substrate'+str(index)])
+
+    for column_name in df:
+        df[column_name] = df[column_name].astype(str)
+
+    df['uniprotKB_accession'][0] = uid
+
+    #display(df)    
+
+    url = "https://www.uniprot.org/uniprot/" + uid + ".xml"
+    f = urlopen(url)
+    xml = f.read()
+    root = etree.fromstring(xml)
+    
+    #以下のコードは下の説明を参照
+    function = root.find('./entry/comment[@type="function"]', root.nsmap)
+    if function==None:
+        print("function was not detected.")
+        pass
+    else:
+        df["function"][0] = function[0].text
+        #print(function[0].text+"¥n")
+
+    sequence = root.find('./entry/sequence', root.nsmap) 
+    if sequence==None: 
+        print("sequence was not detected.")
+        pass 
+    else: 
+        df["sequence"][0] = sequence.text 
+        #print(sequence.text+"¥n")
+
+    #display(df) 
+    #df0=pd.concat([df0, df], axis=0)
+    #display(df0)
+    display(df) 
+    return df["sequence"][0]
+    
+def get_20aa_at_cleavesite(fullaa, cleave_pattern):
+    cleave_point=0
+   # if "-" in cleave_pattern:
+    print(cleave_pattern)
+    cleave_pattern = re.sub("-", "[A-Z]{1}", cleave_pattern)
+    print(cleave_pattern)
+    for i in range(len(fullaa)-7):
+        if re.search(cleave_pattern, fullaa[i:i+8]) != None:
+            cleave_point = i
+            print("cleave_point: " + str(cleave_point))
+            break
+    #twenty_aa = fullaa[cleave_point-6:cleave_point-6+20]
+    if cleave_point <= 6 and cleave_point < len(fullaa)-14:#左が問題，左端問題
+        twenty_aa = fullaa[0:20-(6-cleave_point)]
+        left_lack = 6 - cleave_point
+        twenty_aa = "-"*left_lack + twenty_aa
+    elif cleave_point > 6 and cleave_point >= len(fullaa)-14:#右が問題，右端問題
+        twenty_aa = fullaa[cleave_point-6:len(fullaa)]
+        right_lack = 6-(len(fullaa)-1 -(cleave_point-1)-8)
+        twenty_aa = twenty_aa + "-"*right_lack
+    elif cleave_point <= 6 and cleave_point >= len(fullaa)-14:#両端が問題
+        twenty_aa = fullaa[0:20]
+        left_lack = 6 - cleave_point
+        right_lack = 6-(len(fullaa)-1 -(cleave_point-1)-8)
+        twenty_aa = "-"*left_lack + twenty_aa + "-"*right_lack
+    elif cleave_point > 6 and cleave_point < len(fullaa)-14:
+        twenty_aa = fullaa[cleave_point-6:cleave_point-6+20]
+    else:
+        pass
+
+    print(twenty_aa)
+    return twenty_aa
+    
+def get_negativedata_seq(fullaa, cpt):#cpt = cleave_pattern
+    #if len(fullaa) < 28:
+    #    return 0
+    cleave_point_list = []
+    cpt = re.sub("-", "[A-Z]{1}", cpt)
+    for i in range(len(fullaa)-7):
+        if re.search(cpt, fullaa[i:i+8]) != None:
+            cleave_point_list.append(i)
+            print("cleave_point: " + str(i))
+            #del fullaa[i:i+8]
+            continue
+    cpt = re.sub("-", "", cpt)
+    rdm = 0 
+    while 1:
+        rdm = random.randint(0, len(fullaa)-20)
+        negativedata_twenty_aa = fullaa[rdm:rdm+20]
+        #cptn_min = min(cleave_point_list)
+        #cptn_max = max(cleave_point_list)
+        if cpt in negativedata_twenty_aa:
+            continue
+        else:
+            break
+        
+            '''
+            if (rdm >= cleave_point-7) and (rdm <= cleave_point+7):
+                flag = 1
+            else:
+                flag = 0
+            '''
+    print(cleave_point_list)
+    print(negativedata_twenty_aa)
+    return negativedata_twenty_aa
+
+# マッチパターンが複数あることを探す関数．
+def get_20aa_at_cleavesite_and_search_double_pattern(fullaa, cleave_pattern):
+    cleave_point=0
+    match_pattern_count = 0
+    if "-" in cleave_pattern:
+        cleave_pattern02 = re.sub("-", "[A-Z]{1}", cleave_pattern)
+        for i in range(len(fullaa)-7):
+            if re.search(cleave_pattern02, fullaa[i:i+8]) != None:
+                cleave_point = i
+                match_pattern_count = match_pattern_count + 1
+                print("cleave_point: " + str(cleave_point))
+                continue
+    else:
+        for i in range(len(fullaa)-7):
+            #print(fullaa[i:i+8])
+            if fullaa[i:i+8] == cleave_pattern:
+                cleave_point = i
+                match_pattern_count = match_pattern_count + 1
+                print("cleave_point: " + str(cleave_point))
+                continue
+    return match_pattern_count
+
+def cptn():
+    seq = ""
+    one_char_aa = ""
+    for j in range(8):
+        #print(row)
+        if re.search(r'^([A-Z])+([0-9])+', row[0]):
+            one_char_aa = row[p4num + j - 1]
+        else:
+            one_char_aa = row[p4num + j]
+            
+        #print(one_char_aa) 
+        if one_char_aa == "Ala":
+            one_char_aa = "A"
+        elif one_char_aa == "Cys":
+            one_char_aa = "C"
+        elif one_char_aa == "Asp":
+            one_char_aa = "D"
+        elif one_char_aa == "Glu":
+            one_char_aa = "E"
+        elif one_char_aa == "Phe":
+            one_char_aa = "F"
+        elif one_char_aa == "Gly":
+            one_char_aa = "G"
+        elif one_char_aa == "His":
+            one_char_aa = "H"
+        elif one_char_aa == "Ile":
+            one_char_aa = "I"
+        elif one_char_aa == "Lys":
+            one_char_aa = "K"
+        elif one_char_aa == "Leu":
+            one_char_aa = "L"
+        elif one_char_aa == "Met":
+            one_char_aa = "M"
+        elif one_char_aa == "Asn":
+            one_char_aa = "N"
+        elif one_char_aa == "Pro":
+            one_char_aa = "P"
+        elif one_char_aa == "Gln":
+            one_char_aa = "Q"
+        elif one_char_aa == "Arg":
+            one_char_aa = "R"
+        elif one_char_aa == "Ser":
+            one_char_aa = "S"
+        elif one_char_aa == "Thr":
+            one_char_aa = "T"
+        elif one_char_aa == "Val":
+            one_char_aa = "V"
+        elif one_char_aa == "Trp":
+            one_char_aa = "W"
+        elif one_char_aa == "Tyr":
+            one_char_aa = "Y"
+        else:
+            pass          
+        seq = seq + one_char_aa
+    print("cleave_pattern: "+seq)
+    return seq
+    
+def aa_onezero():
+    for j in range(20):   
+        one_char_aa = twenty_aa[j]
+        if one_char_aa == "A":
+            x_train[i][2][j][0] = 1.0
+        elif one_char_aa == "C":
+            x_train[i][12][j][0] = 1.0
+        elif one_char_aa == "D":
+            x_train[i][15][j][0] = 1.0
+        elif one_char_aa == "E":
+            x_train[i][16][j][0] = 1.0
+        elif one_char_aa == "F":
+            x_train[i][7][j][0] = 1.0
+        elif one_char_aa == "G":
+            x_train[i][0][j][0] = 1.0
+        elif one_char_aa == "H":
+            x_train[i][19][j][0] = 1.0
+        elif one_char_aa == "I":
+            x_train[i][5][j][0] = 1.0
+        elif one_char_aa == "K":
+            x_train[i][17][j][0] = 1.0
+        elif one_char_aa == "L":
+            x_train[i][4][j][0] = 1.0
+        elif one_char_aa == "M":
+            x_train[i][6][j][0] = 1.0
+        elif one_char_aa == "N":
+            x_train[i][13][j][0] = 1.0
+        elif one_char_aa == "P":
+            x_train[i][1][j][0] = 1.0
+        elif one_char_aa == "Q":
+            x_train[i][14][j][0] = 1.0
+        elif one_char_aa == "R":
+            x_train[i][18][j][0] = 1.0
+        elif one_char_aa == "S":
+            x_train[i][10][j][0] = 1.0
+        elif one_char_aa == "T":
+            x_train[i][11][j][0] = 1.0
+        elif one_char_aa == "V":
+            x_train[i][3][j][0] = 1.0
+        elif one_char_aa == "W":
+            x_train[i][9][j][0] = 1.0
+        elif one_char_aa == "Y":
+            x_train[i][8][j][0] = 1.0
+        else:
+            pass
+def aa_charge():
+    for j in range(20):   
+        one_char_aa = twenty_aa[j]
+        if one_char_aa == "A":
+            x_train[i][2][j][1] = charge["A"]
+        elif one_char_aa == "C":
+            x_train[i][12][j][1] = charge["C"]
+        elif one_char_aa == "D":
+            x_train[i][15][j][1] = charge["D"]
+        elif one_char_aa == "E":
+            x_train[i][16][j][1] = charge["E"]
+        elif one_char_aa == "F":
+            x_train[i][7][j][1] = charge["F"]
+        elif one_char_aa == "G":
+            x_train[i][0][j][1] = charge["G"]
+        elif one_char_aa == "H":
+            x_train[i][19][j][1] = charge["H"]
+        elif one_char_aa == "I":
+            x_train[i][5][j][1] = charge["I"]
+        elif one_char_aa == "K":
+            x_train[i][17][j][1] = charge["K"]
+        elif one_char_aa == "L":
+            x_train[i][4][j][1] = charge["L"]
+        elif one_char_aa == "M":
+            x_train[i][6][j][1] = charge["M"]
+        elif one_char_aa == "N":
+            x_train[i][13][j][1] = charge["N"]
+        elif one_char_aa == "P":
+            x_train[i][1][j][1] = charge["P"]
+        elif one_char_aa == "Q":
+            x_train[i][14][j][1] = charge["Q"]
+        elif one_char_aa == "R":
+            x_train[i][18][j][1] = charge["R"]
+        elif one_char_aa == "S":
+            x_train[i][10][j][1] = charge["S"]
+        elif one_char_aa == "T":
+            x_train[i][11][j][1] = charge["T"]
+        elif one_char_aa == "V":
+            x_train[i][3][j][1] = charge["V"]
+        elif one_char_aa == "W":
+            x_train[i][9][j][1] = charge["W"]
+        elif one_char_aa == "Y":
+            x_train[i][8][j][1] = charge["Y"]
+        else:
+            pass
+            
+def aa_hypho():
+    for j in range(20):
+        one_char_aa = twenty_aa[j]
+        if one_char_aa == "A":
+            x_train[i][2][j][2] = hydrophobicity["A"]
+        elif one_char_aa == "C":
+            x_train[i][12][j][2] = hydrophobicity["C"]
+        elif one_char_aa == "D":
+            x_train[i][15][j][2] = hydrophobicity["D"]
+        elif one_char_aa == "E":
+            x_train[i][16][j][2] = hydrophobicity["E"]
+        elif one_char_aa == "F":
+            x_train[i][7][j][2] = hydrophobicity["F"]
+        elif one_char_aa == "G":
+            x_train[i][0][j][2] = hydrophobicity["G"]
+        elif one_char_aa == "H":
+            x_train[i][19][j][2] = hydrophobicity["H"]
+        elif one_char_aa == "I":
+            x_train[i][5][j][2] = hydrophobicity["I"]
+        elif one_char_aa == "K":
+            x_train[i][17][j][2] = hydrophobicity["K"]
+        elif one_char_aa == "L":
+            x_train[i][4][j][2] = hydrophobicity["L"]
+        elif one_char_aa == "M":
+            x_train[i][6][j][2] = hydrophobicity["M"]
+        elif one_char_aa == "N":
+            x_train[i][13][j][2] = hydrophobicity["N"]
+        elif one_char_aa == "P":
+            x_train[i][1][j][2] = hydrophobicity["P"]
+        elif one_char_aa == "Q":
+            x_train[i][14][j][2] = hydrophobicity["Q"]
+        elif one_char_aa == "R":
+            x_train[i][18][j][2] = hydrophobicity["R"]
+        elif one_char_aa == "S":
+            x_train[i][10][j][2] = hydrophobicity["S"]
+        elif one_char_aa == "T":
+            x_train[i][11][j][2] = hydrophobicity["T"]
+        elif one_char_aa == "V":
+            x_train[i][3][j][2] = hydrophobicity["V"]
+        elif one_char_aa == "W":
+            x_train[i][9][j][2] = hydrophobicity["W"]
+        elif one_char_aa == "Y":
+            x_train[i][8][j][2] = hydrophobicity["Y"]
+        else:
+            pass    
+ 
+ #uid=['P0ACE3']
+uid=['O00187']
+secoundary_structure = cur.execute("SELECT substrate_2d FROM substrate_2d WHERE uniprot_acc=(%s);", uid) 
+print(secoundary_structure)
+
+#https://trade-and-develop.hatenablog.com/entry/2017/02/23/021119
+cur = conn.cursor(buffered=True)
+
+#adding secoundary structure
+def add_secoundary_structure(uid, p4, twenty_aa):
+    cur.execute("SELECT substrate_2d FROM cleavage where uniprot_acc=(%s);", uid)  
+    ss = cur.fetchall()
+    for j in range(20):
+         one_char_aa = twenty_aa[j]
+        if ss[0][0][p4-1 + j] == 'a':
+            if one_char_aa == "A":
+                x_train[i][2][j][3] = 1
+            elif one_char_aa == "C":
+                x_train[i][12][j][3] = 1
+            elif one_char_aa == "D":
+                x_train[i][15][j][3] = 1
+            elif one_char_aa == "E":
+                x_train[i][16][j][3] = 1
+            elif one_char_aa == "F":
+                x_train[i][7][j][3] = 1
+            elif one_char_aa == "G":
+                x_train[i][0][j][3] = 1
+            elif one_char_aa == "H":
+                x_train[i][19][j][3] = 1
+            elif one_char_aa == "I":
+                x_train[i][5][j][3] = 1
+            elif one_char_aa == "K":
+                x_train[i][17][j][3] = 1
+            elif one_char_aa == "L":
+                x_train[i][4][j][3] = 1
+            elif one_char_aa == "M":
+                x_train[i][6][j][3] = 1
+            elif one_char_aa == "N":
+                x_train[i][13][j][3] = 1
+            elif one_char_aa == "P":
+                x_train[i][1][j][3] = 1
+            elif one_char_aa == "Q":
+                x_train[i][14][j][3] = 1
+            elif one_char_aa == "R":
+                x_train[i][18][j][3] = 1
+            elif one_char_aa == "S":
+                x_train[i][10][j][3] = 1
+            elif one_char_aa == "T":
+                x_train[i][11][j][3] = 1
+            elif one_char_aa == "V":
+                x_train[i][3][j][3] = 1
+            elif one_char_aa == "W":
+                x_train[i][9][j][3] = 1
+            elif one_char_aa == "Y":
+                x_train[i][8][j][3] = 1
+        elif ss[0][0][p4-1 + j] =='b':
+            if one_char_aa == "A":
+                x_train[i][2][j][4] = 1
+            elif one_char_aa == "C":
+                x_train[i][12][j][4] =1
+            elif one_char_aa == "D":
+                x_train[i][15][j][4] = 1
+            elif one_char_aa == "E":
+                x_train[i][16][j][4] = 1
+            elif one_char_aa == "F":
+                x_train[i][7][j][4] = 1
+            elif one_char_aa == "G":
+                x_train[i][0][j][4] = 1
+            elif one_char_aa == "H":
+                x_train[i][19][j][4] = 1
+            elif one_char_aa == "I":
+                x_train[i][5][j][4] = 1
+            elif one_char_aa == "K":
+                x_train[i][17][j][4] = 1
+            elif one_char_aa == "L":
+                x_train[i][4][j][4] = 1
+            elif one_char_aa == "M":
+                x_train[i][6][j][4] = 1
+            elif one_char_aa == "N":
+                x_train[i][13][j][4] = 1
+            elif one_char_aa == "P":
+                x_train[i][1][j][4] = 1
+            elif one_char_aa == "Q":
+                x_train[i][14][j][4] = 1
+            elif one_char_aa == "R":
+                x_train[i][18][j][4] = 1
+            elif one_char_aa == "S":
+                x_train[i][10][j][4] = 1
+            elif one_char_aa == "T":
+                x_train[i][11][j][4] = 1
+            elif one_char_aa == "V":
+                x_train[i][3][j][4] = 1
+            elif one_char_aa == "W":
+                x_train[i][9][j][4] = 1
+            elif one_char_aa == "Y":
+                x_train[i][8][j][4] = 1
+        else:
+            pass    
+#https://www.sigmaaldrich.com/JP/ja/technical-documents/technical-article/protein-biology/protein-structural-analysis/amino-acid-reference-chart
+df_aap = pd.read_table('./amino_acids_properties/amino_acid_info_merck.tsv', index_col=0)
+print(df_aap)
+
+
+def aa_properties(twenty_aa):
+    for j in range(20):
+        one_char_aa = twenty_aa[j]
+        if one_char_aa == "A":
+            x_train[i][2][j][5] = df_aap.at['Alanine', 'MolecularWeight']
+            x_train[i][2][j][6] = df_aap.at['Alanine', 'ResidueWeight_without_water']
+            x_train[i][2][j][7] = df_aap.at['Alanine', 'pKa']
+            x_train[i][2][j][8] = df_aap.at['Alanine', 'pKb']
+            x_train[i][2][j][9] = df_aap.at['Alanine', 'pl']
+            x_train[i][2][j][10] = df_aap.at['Alanine', 'C']
+            x_train[i][2][j][11] = df_aap.at['Alanine', 'H']
+            x_train[i][2][j][12] = df_aap.at['Alanine', 'N']
+            x_train[i][2][j][13] = df_aap.at['Alanine', 'O']
+            x_train[i][2][j][14] = df_aap.at['Alanine', 'S']
+        elif one_char_aa == "C":
+            #x_train[i][12][j][2] = hydrophobicity["C"]
+            x_train[i][2][j][5] = df_aap.at['Cysteine', 'MolecularWeight']
+            x_train[i][2][j][6] = df_aap.at['Cysteine', 'ResidueWeight_without_water']
+            x_train[i][2][j][7] = df_aap.at['Cysteine', 'pKa']
+            x_train[i][2][j][8] = df_aap.at['Cysteine', 'pKb']
+            x_train[i][2][j][9] = df_aap.at['Cysteine', 'pl']
+            x_train[i][2][j][10] = df_aap.at['Cysteine', 'C']
+            x_train[i][2][j][11] = df_aap.at['Cysteine', 'H']
+            x_train[i][2][j][12] = df_aap.at['Cysteine', 'N']
+            x_train[i][2][j][13] = df_aap.at['Cysteine', 'O']
+            x_train[i][2][j][14] = df_aap.at['Cysteine', 'S']
+        elif one_char_aa == "D":
+            #x_train[i][15][j][2] = hydrophobicity["D"]
+            x_train[i][2][j][5] = df_aap.at['Aspartic acid', 'MolecularWeight']
+            x_train[i][2][j][6] = df_aap.at['Aspartic acid', 'ResidueWeight_without_water']
+            x_train[i][2][j][7] = df_aap.at['Aspartic acid', 'pKa']
+            x_train[i][2][j][8] = df_aap.at['Aspartic acid', 'pKb']
+            x_train[i][2][j][9] = df_aap.at['Aspartic acid', 'pl']
+            x_train[i][2][j][10] = df_aap.at['Aspartic acid', 'C']
+            x_train[i][2][j][11] = df_aap.at['Aspartic acid', 'H']
+            x_train[i][2][j][12] = df_aap.at['Aspartic acid', 'N']
+            x_train[i][2][j][13] = df_aap.at['Aspartic acid', 'O']
+            x_train[i][2][j][14] = df_aap.at['Aspartic acid', 'S']
+        elif one_char_aa == "E":
+            #x_train[i][16][j][2] = hydrophobicity["E"]
+            x_train[i][2][j][5] = df_aap.at['Glutamic acid', 'MolecularWeight']
+            x_train[i][2][j][6] = df_aap.at['Glutamic acid', 'ResidueWeight_without_water']
+            x_train[i][2][j][7] = df_aap.at['Glutamic acid', 'pKa']
+            x_train[i][2][j][8] = df_aap.at['Glutamic acid', 'pKb']
+            x_train[i][2][j][9] = df_aap.at['Glutamic acid', 'pl']
+            x_train[i][2][j][10] = df_aap.at['Glutamic acid', 'C']
+            x_train[i][2][j][11] = df_aap.at['Glutamic acid', 'H']
+            x_train[i][2][j][12] = df_aap.at['Glutamic acid', 'N']
+            x_train[i][2][j][13] = df_aap.at['Glutamic acid', 'O']
+            x_train[i][2][j][14] = df_aap.at['Glutamic acid', 'S']
+        elif one_char_aa == "F":
+            #x_train[i][7][j][2] = hydrophobicity["F"]
+            x_train[i][2][j][5] = df_aap.at['Phenylalanine', 'MolecularWeight']
+            x_train[i][2][j][6] = df_aap.at['Phenylalanine', 'ResidueWeight_without_water']
+            x_train[i][2][j][7] = df_aap.at['Phenylalanine', 'pKa']
+            x_train[i][2][j][8] = df_aap.at['Phenylalanine', 'pKb']
+            x_train[i][2][j][9] = df_aap.at['Phenylalanine', 'pl']
+            x_train[i][2][j][10] = df_aap.at['Phenylalanine', 'C']
+            x_train[i][2][j][11] = df_aap.at['Phenylalanine', 'H']
+            x_train[i][2][j][12] = df_aap.at['Phenylalanine', 'N']
+            x_train[i][2][j][13] = df_aap.at['Phenylalanine', 'O']
+            x_train[i][2][j][14] = df_aap.at['Phenylalanine', 'S']
+        elif one_char_aa == "G":
+            #x_train[i][0][j][2] = hydrophobicity["G"]
+            x_train[i][2][j][5] = df_aap.at['Glycine', 'MolecularWeight']
+            x_train[i][2][j][6] = df_aap.at['Glycine', 'ResidueWeight_without_water']
+            x_train[i][2][j][7] = df_aap.at['Glycine', 'pKa']
+            x_train[i][2][j][8] = df_aap.at['Glycine', 'pKb']
+            x_train[i][2][j][9] = df_aap.at['Glycine', 'pl']
+            x_train[i][2][j][10] = df_aap.at['Glycine', 'C']
+            x_train[i][2][j][11] = df_aap.at['Glycine', 'H']
+            x_train[i][2][j][12] = df_aap.at['Glycine', 'N']
+            x_train[i][2][j][13] = df_aap.at['Glycine', 'O']
+            x_train[i][2][j][14] = df_aap.at['Glycine', 'S']
+        elif one_char_aa == "H":
+            #x_train[i][19][j][2] = hydrophobicity["H"]
+            x_train[i][2][j][5] = df_aap.at['Histidine', 'MolecularWeight']
+            x_train[i][2][j][6] = df_aap.at['Histidine', 'ResidueWeight_without_water']
+            x_train[i][2][j][7] = df_aap.at['Histidine', 'pKa']
+            x_train[i][2][j][8] = df_aap.at['Histidine', 'pKb']
+            x_train[i][2][j][9] = df_aap.at['Histidine', 'pl']
+            x_train[i][2][j][10] = df_aap.at['Histidine', 'C']
+            x_train[i][2][j][11] = df_aap.at['Histidine', 'H']
+            x_train[i][2][j][12] = df_aap.at['Histidine', 'N']
+            x_train[i][2][j][13] = df_aap.at['Histidine', 'O']
+            x_train[i][2][j][14] = df_aap.at['Histidine', 'S']
+        elif one_char_aa == "I":
+            #x_train[i][5][j][2] = hydrophobicity["I"]
+            x_train[i][2][j][5] = df_aap.at['Isoleucine', 'MolecularWeight']
+            x_train[i][2][j][6] = df_aap.at['Isoleucine', 'ResidueWeight_without_water']
+            x_train[i][2][j][7] = df_aap.at['Isoleucine', 'pKa']
+            x_train[i][2][j][8] = df_aap.at['Isoleucine', 'pKb']
+            x_train[i][2][j][9] = df_aap.at['Isoleucine', 'pl']
+            x_train[i][2][j][10] = df_aap.at['Isoleucine', 'C']
+            x_train[i][2][j][11] = df_aap.at['Isoleucine', 'H']
+            x_train[i][2][j][12] = df_aap.at['Isoleucine', 'N']
+            x_train[i][2][j][13] = df_aap.at['Isoleucine', 'O']
+            x_train[i][2][j][14] = df_aap.at['Isoleucine', 'S']
+        elif one_char_aa == "K":
+            #x_train[i][17][j][2] = hydrophobicity["K"]
+            x_train[i][2][j][5] = df_aap.at['Lysine ', 'MolecularWeight']
+            x_train[i][2][j][6] = df_aap.at['Lysine ', 'ResidueWeight_without_water']
+            x_train[i][2][j][7] = df_aap.at['Lysine ', 'pKa']
+            x_train[i][2][j][8] = df_aap.at['Lysine ', 'pKb']
+            x_train[i][2][j][9] = df_aap.at['Lysine ', 'pl']
+            x_train[i][2][j][10] = df_aap.at['Lysine ', 'C']
+            x_train[i][2][j][11] = df_aap.at['Lysine ', 'H']
+            x_train[i][2][j][12] = df_aap.at['Lysine ', 'N']
+            x_train[i][2][j][13] = df_aap.at['Lysine ', 'O']
+            x_train[i][2][j][14] = df_aap.at['Lysine ', 'S']
+        elif one_char_aa == "L":
+            #x_train[i][4][j][2] = hydrophobicity["L"]
+            x_train[i][2][j][5] = df_aap.at['Leucine', 'MolecularWeight']
+            x_train[i][2][j][6] = df_aap.at['Leucine', 'ResidueWeight_without_water']
+            x_train[i][2][j][7] = df_aap.at['Leucine', 'pKa']
+            x_train[i][2][j][8] = df_aap.at['Leucine', 'pKb']
+            x_train[i][2][j][9] = df_aap.at['Leucine', 'pl']
+            x_train[i][2][j][10] = df_aap.at['Leucine', 'C']
+            x_train[i][2][j][11] = df_aap.at['Leucine', 'H']
+            x_train[i][2][j][12] = df_aap.at['Leucine', 'N']
+            x_train[i][2][j][13] = df_aap.at['Leucine', 'O']
+            x_train[i][2][j][14] = df_aap.at['Leucine', 'S']
+        elif one_char_aa == "M":
+            #x_train[i][6][j][2] = hydrophobicity["M"]
+            x_train[i][2][j][5] = df_aap.at['Methionine', 'MolecularWeight']
+            x_train[i][2][j][6] = df_aap.at['Methionine', 'ResidueWeight_without_water']
+            x_train[i][2][j][7] = df_aap.at['Methionine', 'pKa']
+            x_train[i][2][j][8] = df_aap.at['Methionine', 'pKb']
+            x_train[i][2][j][9] = df_aap.at['Methionine', 'pl']
+            x_train[i][2][j][10] = df_aap.at['Methionine', 'C']
+            x_train[i][2][j][11] = df_aap.at['Methionine', 'H']
+            x_train[i][2][j][12] = df_aap.at['Methionine', 'N']
+            x_train[i][2][j][13] = df_aap.at['Methionine', 'O']
+            x_train[i][2][j][14] = df_aap.at['Methionine', 'S']
+        elif one_char_aa == "N":
+            #x_train[i][13][j][2] = hydrophobicity["N"]
+            x_train[i][2][j][5] = df_aap.at['Asparagine', 'MolecularWeight']
+            x_train[i][2][j][6] = df_aap.at['Asparagine', 'ResidueWeight_without_water']
+            x_train[i][2][j][7] = df_aap.at['Asparagine', 'pKa']
+            x_train[i][2][j][8] = df_aap.at['Asparagine', 'pKb']
+            x_train[i][2][j][9] = df_aap.at['Asparagine', 'pl']
+            x_train[i][2][j][10] = df_aap.at['Asparagine', 'C']
+            x_train[i][2][j][11] = df_aap.at['Asparagine', 'H']
+            x_train[i][2][j][12] = df_aap.at['Asparagine', 'N']
+            x_train[i][2][j][13] = df_aap.at['Asparagine', 'O']
+            x_train[i][2][j][14] = df_aap.at['Asparagine', 'S']
+        elif one_char_aa == "P":
+            #x_train[i][1][j][2] = hydrophobicity["P"]
+            x_train[i][2][j][5] = df_aap.at['Proline', 'MolecularWeight']
+            x_train[i][2][j][6] = df_aap.at['Proline', 'ResidueWeight_without_water']
+            x_train[i][2][j][7] = df_aap.at['Proline', 'pKa']
+            x_train[i][2][j][8] = df_aap.at['Proline', 'pKb']
+            x_train[i][2][j][9] = df_aap.at['Proline', 'pl']
+            x_train[i][2][j][10] = df_aap.at['Proline', 'C']
+            x_train[i][2][j][11] = df_aap.at['Proline', 'H']
+            x_train[i][2][j][12] = df_aap.at['Proline', 'N']
+            x_train[i][2][j][13] = df_aap.at['Proline', 'O']
+            x_train[i][2][j][14] = df_aap.at['Proline', 'S']
+        elif one_char_aa == "Q":
+            #x_train[i][14][j][2] = hydrophobicity["Q"]
+            x_train[i][2][j][5] = df_aap.at['Glutamine', 'MolecularWeight']
+            x_train[i][2][j][6] = df_aap.at['Glutamine', 'ResidueWeight_without_water']
+            x_train[i][2][j][7] = df_aap.at['Glutamine', 'pKa']
+            x_train[i][2][j][8] = df_aap.at['Glutamine', 'pKb']
+            x_train[i][2][j][9] = df_aap.at['Glutamine', 'pl']
+            x_train[i][2][j][10] = df_aap.at['Glutamine', 'C']
+            x_train[i][2][j][11] = df_aap.at['Glutamine', 'H']
+            x_train[i][2][j][12] = df_aap.at['Glutamine', 'N']
+            x_train[i][2][j][13] = df_aap.at['Glutamine', 'O']
+            x_train[i][2][j][14] = df_aap.at['Glutamine', 'S']
+        elif one_char_aa == "R":
+            #x_train[i][18][j][2] = hydrophobicity["R"]
+            x_train[i][2][j][5] = df_aap.at['Arginine', 'MolecularWeight']
+            x_train[i][2][j][6] = df_aap.at['Arginine', 'ResidueWeight_without_water']
+            x_train[i][2][j][7] = df_aap.at['Arginine', 'pKa']
+            x_train[i][2][j][8] = df_aap.at['Arginine', 'pKb']
+            x_train[i][2][j][9] = df_aap.at['Arginine', 'pl']
+            x_train[i][2][j][10] = df_aap.at['Arginine', 'C']
+            x_train[i][2][j][11] = df_aap.at['Arginine', 'H']
+            x_train[i][2][j][12] = df_aap.at['Arginine', 'N']
+            x_train[i][2][j][13] = df_aap.at['Arginine', 'O']
+            x_train[i][2][j][14] = df_aap.at['Arginine', 'S']
+        elif one_char_aa == "S":
+            #x_train[i][10][j][2] = hydrophobicity["S"]
+            x_train[i][2][j][5] = df_aap.at['Serine', 'MolecularWeight']
+            x_train[i][2][j][6] = df_aap.at['Serine', 'ResidueWeight_without_water']
+            x_train[i][2][j][7] = df_aap.at['Serine', 'pKa']
+            x_train[i][2][j][8] = df_aap.at['Serine', 'pKb']
+            x_train[i][2][j][9] = df_aap.at['Serine', 'pl']
+            x_train[i][2][j][10] = df_aap.at['Serine', 'C']
+            x_train[i][2][j][11] = df_aap.at['Serine', 'H']
+            x_train[i][2][j][12] = df_aap.at['Serine', 'N']
+            x_train[i][2][j][13] = df_aap.at['Serine', 'O']
+            x_train[i][2][j][14] = df_aap.at['Serine', 'S']
+        elif one_char_aa == "T":
+            #x_train[i][11][j][2] = hydrophobicity["T"]
+            x_train[i][2][j][5] = df_aap.at['Threonine', 'MolecularWeight']
+            x_train[i][2][j][6] = df_aap.at['Threonine', 'ResidueWeight_without_water']
+            x_train[i][2][j][7] = df_aap.at['Threonine', 'pKa']
+            x_train[i][2][j][8] = df_aap.at['Threonine', 'pKb']
+            x_train[i][2][j][9] = df_aap.at['Threonine', 'pl']
+            x_train[i][2][j][10] = df_aap.at['Threonine', 'C']
+            x_train[i][2][j][11] = df_aap.at['Threonine', 'H']
+            x_train[i][2][j][12] = df_aap.at['Threonine', 'N']
+            x_train[i][2][j][13] = df_aap.at['Threonine', 'O']
+            x_train[i][2][j][14] = df_aap.at['Threonine', 'S']
+        elif one_char_aa == "V":
+            #x_train[i][3][j][2] = hydrophobicity["V"]
+            x_train[i][2][j][5] = df_aap.at['Valine', 'MolecularWeight']
+            x_train[i][2][j][6] = df_aap.at['Valine', 'ResidueWeight_without_water']
+            x_train[i][2][j][7] = df_aap.at['Valine', 'pKa']
+            x_train[i][2][j][8] = df_aap.at['Valine', 'pKb']
+            x_train[i][2][j][9] = df_aap.at['Valine', 'pl']
+            x_train[i][2][j][10] = df_aap.at['Valine', 'C']
+            x_train[i][2][j][11] = df_aap.at['Valine', 'H']
+            x_train[i][2][j][12] = df_aap.at['Valine', 'N']
+            x_train[i][2][j][13] = df_aap.at['Valine', 'O']
+            x_train[i][2][j][14] = df_aap.at['Valine', 'S']
+        elif one_char_aa == "W":
+            #x_train[i][9][j][2] = hydrophobicity["W"]
+            x_train[i][2][j][5] = df_aap.at['Tryptophan', 'MolecularWeight']
+            x_train[i][2][j][6] = df_aap.at['Tryptophan', 'ResidueWeight_without_water']
+            x_train[i][2][j][7] = df_aap.at['Tryptophan', 'pKa']
+            x_train[i][2][j][8] = df_aap.at['Tryptophan', 'pKb']
+            x_train[i][2][j][9] = df_aap.at['Tryptophan', 'pl']
+            x_train[i][2][j][10] = df_aap.at['Tryptophan', 'C']
+            x_train[i][2][j][11] = df_aap.at['Tryptophan', 'H']
+            x_train[i][2][j][12] = df_aap.at['Tryptophan', 'N']
+            x_train[i][2][j][13] = df_aap.at['Tryptophan', 'O']
+            x_train[i][2][j][14] = df_aap.at['Tryptophan', 'S']
+        elif one_char_aa == "Y":
+            #x_train[i][8][j][2] = hydrophobicity["Y"]
+            x_train[i][2][j][5] = df_aap.at['Tyrosine', 'MolecularWeight']
+            x_train[i][2][j][6] = df_aap.at['Tyrosine', 'ResidueWeight_without_water']
+            x_train[i][2][j][7] = df_aap.at['Tyrosine', 'pKa']
+            x_train[i][2][j][8] = df_aap.at['Tyrosine', 'pKb']
+            x_train[i][2][j][9] = df_aap.at['Tyrosine', 'pl']
+            x_train[i][2][j][10] = df_aap.at['Tyrosine', 'C']
+            x_train[i][2][j][11] = df_aap.at['Tyrosine', 'H']
+            x_train[i][2][j][12] = df_aap.at['Tyrosine', 'N']
+            x_train[i][2][j][13] = df_aap.at['Tyrosine', 'O']
+            x_train[i][2][j][14] = df_aap.at['Tyrosine', 'S']
+        else:
+            pass    
+
+# 複数箇所に8アミノ酸のパターンマッチがアミノ酸全体を見たときにあるのかどうかを探索する．
+#実行しなくてもよい．
+flag = 0
+substrate_turn = 0
+index = 0
+for filename in filenames_posi:
+    with open(filename, 'r') as f:
+        row_list = f.read().split("\n")
+        p4num = 0
+        aa_row = 0
+        aa_row_last = 0
+        print("row_list"+str(row_list)+"\n")
+        for i in range(len(row_list)):
+        #    if row_list[i][0] == "Substrate":
+            if re.search(r'Substrate\t', row_list[i]):
+                row = row_list[i].split("\t")
+                print("row"+str(row)+"\n")
+                for j in range(len(row)):
+                    if row[j] == "P4":
+                        p4num = j
+                        print("p4num:"+str(p4num)+"\n")
+                        break
+                aa_row = i + 1
+                print("aa_row:"+str(aa_row)+"\n")
+                break
+
+        for i in range(aa_row, len(row_list)):
+            if len(row_list[i])==0:
+                pass 
+            else:
+                aa_row_last = i
+        print("aa_row_last:"+str(aa_row_last)+"\n")
+
+        aa_rows = aa_row_last - aa_row + 1
+        print("aa_rows:"+str(aa_rows)+"\n")
+        
+        #define array that has 3 rank tensor with 3 channels about 1 or 0, charge and hydrophobicity.
+        x_train = np.zeros([aa_rows, 20, 20, 3])
+        #print(x_train)
+        print("len(x_train):"+str(len(x_train))+"\n")
+
+        for i in range(aa_rows):
+            row = row_list[aa_row + i].split("\t")
+
+        for i in range(aa_rows):
+            row = row_list[aa_row + i].split("\t")
+
+            print("===========substrate"+str(i)+"=================")
+            #func1
+            cleave_pattern = ""
+            cleave_pattern = cptn()       
+
+            print("row[0]: " + row[0])
+            print("row[1]: " + row[1])
+
+            #uidを抽出
+            if re.search(r'^([A-Z]){1}([0-9]){5}', row[0]):
+                uid = row[0]
+            elif re.search(r'^([A-Z]){1}([0-9]){5}', row[1]):
+                uid = row[1]
+            else:
+                uid = "null"
+                continue
+            print("uid:" + uid)
+            fullaa = aaseq_from_uid(uid, substrate_turn, index)
+            index = index + 1
+            mpc = get_20aa_at_cleavesite_and_search_double_pattern(fullaa, cleave_pattern)
+            print("cleave_site_count: "+str(mpc))
+            if mpc  > 1:
+                flag = flag +1
+                break
+    substrate_turn = substrate_turn + 1      
+    
+print("flag: " + str(flag))
+print("END")
+
+
+#2.1
+#define positive data array 
+
+# 各アミノ酸について電荷と疎水性の値を定義
+charge = {"A":0., "C":-0.0735876, "D":-0.9994991, "E":-0.9987427, "F":0., "G":0., "H":0.0593509, "I":0.,
+          "K":0.9997489, "L":0., "M":0., "N":0., "P":0., "Q":0., "R":0.9999950, "S":0., "T":0., "V":0., "W":0., "Y":-0.0001995}
+hydrophobicity = {"A":0.1630295, "C":-0.2554557, "D":-0.9794608, "E":-0.7458280, "F":0.9152760,
+                  "G":-0.2554557, "H":-0.7869063, "I":0.8510911, "K":-0.8510911, "L":1.,
+                  "M":0.7227214, "N":-1., "P":-0.0860077, "Q":-0.8305520, "R":-0.7021823,
+                  "S":-0.4685494, "T":-0.3838254, "V":0.6816431, "W":0.8305520, "Y":0.5738126}
+count = 0
+protease_turn = 0
+index = 0
+consecutive_uid = 0
+uid_list = []
+flag = 0
+
+for filename in filenames_posi:
+    #filename = "./trainingdata(positive)/" + filename
+    print("==================================protease"+str(count)+"=======================================")
+    with open(filename, 'r') as f:
+        row_list = f.read().split("\n")
+        p4num = 0
+        aa_row = 0
+        aa_row_last = 0
+        print("row_list"+str(row_list)+"\n")
+        for i in range(len(row_list)):
+        #    if row_list[i][0] == "Substrate":
+            if re.search(r'Substrate\t', row_list[i]):
+                row = row_list[i].split("\t")
+                print("row"+str(row)+"\n")
+                for j in range(len(row)):
+                    if row[j] == "P4":
+                        p4num = j
+                        print("p4num:"+str(p4num)+"\n")
+                        break
+                aa_row = i + 1
+                print("aa_row:"+str(aa_row)+"\n")
+                break
+
+        for i in range(aa_row, len(row_list)):
+            if len(row_list[i])==0:
+                pass 
+            else:
+                aa_row_last = i
+        print("aa_row_last:"+str(aa_row_last)+"\n")
+
+        aa_rows = aa_row_last - aa_row + 1
+        print("aa_rows:"+str(aa_rows)+"\n")
+        #define array that has 3 rank tensor with 3 channels about 1 or 0, charge and hydrophobicity.
+        x_train = np.zeros([aa_rows, 20, 20, 14])
+        #print(x_train)
+        print("len(x_train):"+str(len(x_train))+"\n")
+
+        for i in range(aa_rows):
+            row = row_list[aa_row + i].split("\t")
+            
+            print("-------------------protease "+str()+"substrate"+str(i)+"=================")
+            #func1
+            cleave_pattern = ""
+            cleave_pattern = cptn()       
+            
+            print("row[0]: " + row[0])
+            print("row[1]: " + row[1])
+
+            #uidを抽出
+            if re.search(r'^([A-Z]){1}([0-9]){5}', row[0]):
+                uid = row[0]
+            elif re.search(r'^([A-Z]){1}([0-9]){5}', row[1]):
+                uid = row[1]
+            else:
+                uid = "null"
+                continue
+                
+            uid_list = []
+            uid = str(uid)
+            uid_list.append(uid)
+            j = 1
+            while 1:
+                if aa_row+i+j == len(row_list):
+                    break
+                print(uid_list)
+                next_uid = str(row_list[aa_row+i+j])
+                if uid == next_uid:
+                    uid_list.append(next_uid)
+                    consecutive_uid = consecutive_uid + 1
+                    print(uid_list)
+                else:
+                    skipp = len(uid_list) - 1
+                    print("uid_list_len: "+str(len(uid_list)))
+                    break
+                j = j + 1
+                print(j)
+        
+            print("uid:" + uid)
+            fullaa = aaseq_from_uid(uid, substrate_turn, i)
+            print("fullaa_len: "+str(len(fullaa)))
+            index = index + 1
+            
+            twenty_aa = get_20aa_at_cleavesite(fullaa, cleave_pattern)
+            
+            
+            mpc = get_20aa_at_cleavesite_and_search_double_pattern(fullaa, cleave_pattern)
+            print("cleave_site_count: "+str(mpc))
+            if mpc  > 1:
+                flag = flag +1
+            
+            #func2
+            aa_onezero()
+            
+            #func3
+            aa_charge()
+            
+            #func4
+            aa_hypho()
+            
+            
+            #func5
+            p4 = cleave_point
+            add_secoundary_structure(uid, p4, twenty_aa)
+            
+            #func6
+            aa_properties(twenty_aa)
+            
+            
+    protease_turn = protease_turn + 1
+    print("The number of substrates that had multiple same cleavage sites: "+str(flag))
+    
+    #3.1
+    #create x_train positive file.
+    filename = filename.replace("trainingdata(positive)/", "")
+    path_w = "./preprocessed_data/preprocessed_trainingdata(positive)/preprocessed_" + filename
+
+    with open(path_w, mode='w') as f:
+        f.write(str(x_train))
+        f.write(str(len(x_train)))
+        f.write("\n")
+    with open(path_w) as f:
+        print(f.read())
+    print("count")
+    print(count)
+    print("\n")
+    
+    if count == 0:
+        #12
+        #initialize
+        # "positive_data", first time
+        random.shuffle(x_train)
+        x_train_all=x_train
+        
+        y_train_all=np.array([[1.0, 0.0]]*aa_rows)
+        subs_sum=0
+        subs_sum = subs_sum + aa_rows
+        
+        #14
+        #initialize
+        #5-cross validation list at first time. "positive_data"
+        items = aa_rows // 5
+        print("aa_rows//5: "+str(items)+"\n")
+        x_train_all_5crossval = np.zeros([items, 20, 20, 3])
+        y_train_all_5crossval  = np.array([[1.0, 0.0]]*items)
+        
+        #16
+        #initialize
+        #"positive_data", execute Stack to createt 5-cross validation list at first time.
+        items = aa_rows // 5
+        #aa_rows = aa_rows - items
+        for i in range(items):
+            x_train_all_5crossval[i] = x_train_all[-1]
+            x_train_all = np.delete(x_train_all, -1, 0)
+            y_train_all = np.delete(y_train_all, -1, 0)
+        
+    else:
+        #13.2
+        #since second time
+        #"positive_data", since second time.
+        random.shuffle(x_train)
+        x_train_all = np.append(x_train_all, x_train, 0)
+        
+        y_train = np.array([[1.0, 0.0]]*aa_rows)
+        y_train_all = np.append(y_train_all, y_train, 0)
+        subs_sum = subs_sum + aa_rows
+        
+        #17
+        #since sencond time
+        #"positive_data", execute Stack to createt 5-cross validation list scince second time.
+        items = aa_rows // 5
+        #aa_rows = aa_rows - items
+        for i in range(items):
+            xt = x_train_all[-1]
+            x_train_all = np.delete(x_train_all, -1, 0)
+            y_train_all = np.delete(y_train_all, -1, 0)
+            x_train_all_5crossval = np.append(x_train_all_5crossval, [xt], 0)
+            y_train = np.array([[1.0, 0.0]])
+            y_train_all_5crossval = np.append(y_train_all_5crossval, y_train, 0)
+
+    count = count + 1
+print("consecutive_uid: "+str(consecutive_uid))
+
+print("END")
+
+
+print(len(x_train_all))
+print(len(x_train_all_5crossval))
+print(subs_sum)
+
+
+
+#2.1
+#define ""negative"" data array 
+
+#3
+# 各アミノ酸について電荷と疎水性の値を定義
+charge = {"A":0., "C":-0.0735876, "D":-0.9994991, "E":-0.9987427, "F":0., "G":0., "H":0.0593509, "I":0.,
+          "K":0.9997489, "L":0., "M":0., "N":0., "P":0., "Q":0., "R":0.9999950, "S":0., "T":0., "V":0., "W":0., "Y":-0.0001995}
+hydrophobicity = {"A":0.1630295, "C":-0.2554557, "D":-0.9794608, "E":-0.7458280, "F":0.9152760,
+                  "G":-0.2554557, "H":-0.7869063, "I":0.8510911, "K":-0.8510911, "L":1.,
+                  "M":0.7227214, "N":-1., "P":-0.0860077, "Q":-0.8305520, "R":-0.7021823,
+                  "S":-0.4685494, "T":-0.3838254, "V":0.6816431, "W":0.8305520, "Y":0.5738126}
+
+count = 0
+substrate_turn = 0
+index = 0
+consecutive_uid = 0
+uid_list = []
+flag = 0
+
+for filename in filenames_posi:
+    #filename = "trainingdata(positive)/" + filename
+    with open(filename, 'r') as f:
+        row_list = f.read().split("\n")
+        print("len(row_list): "+str(len(row_list)))
+        p4num = 0
+        aa_row = 0
+        aa_row_last = 0
+        print("row_list"+str(row_list)+"\n")
+        for i in range(len(row_list)):
+        #    if row_list[i][0] == "Substrate":
+            if re.search(r'Substrate\t', row_list[i]):
+                row = row_list[i].split("\t")
+                print("row"+str(row)+"\n")
+                for j in range(len(row)):
+                    if row[j] == "P4":
+                        p4num = j
+                        print("p4num:"+str(p4num)+"\n")
+                        break
+                aa_row = i + 1
+                print("aa_row:"+str(aa_row)+"\n")
+                break
+
+                
+                
+                
+        for i in range(aa_row, len(row_list)):
+            if len(row_list[i])==0:
+                pass 
+            else:
+                aa_row_last = i
+        print("aa_row_last:"+str(aa_row_last)+"\n")   
+        
+        aa_rows = aa_row_last - aa_row + 1
+        print("aa_rows:"+str(aa_rows)+"\n")
+        #define array that has 3 rank tensor with 3 channels about 1 or 0, charge and hydrophobicity.
+        x_train = np.zeros([aa_rows, 20, 20, 14])
+        #print(x_train)
+        print("len(x_train):"+str(len(x_train))+"\n")
+
+
+        for i in range(aa_rows):
+            
+            if skipp > 0:
+                skipp = skipp - 1
+                continue
+            row = row_list[aa_row + i].split("\t")
+            
+            print("===========substrate"+str(i)+"=================")
+            #func1
+            cleave_pattern = ""
+            cleave_pattern = cptn()       
+            
+            print("row[0]: " + row[0])
+            print("row[1]: " + row[1])
+
+            #uidを抽出
+            if re.search(r'^([A-Z]){1}([0-9]){5}', row[0]):
+                uid = row[0]
+            elif re.search(r'^([A-Z]){1}([0-9]){5}', row[1]):
+                uid = row[1]
+            else:
+                uid = ""
+                continue
+            print(uid)
+            uid_list = []
+            uid = str(uid)
+            uid_list.append(uid)
+            j = 1
+            while 1:
+                if aa_row+i+j == len(row_list):
+                    break
+                print(uid_list)
+                next_uid = str(row_list[aa_row+i+j])
+                if uid == next_uid:
+                    uid_list.append(next_uid)
+                    consecutive_uid = consecutive_uid + 1
+                    print(uid_list)
+                else:
+                    skipp = len(uid_list) - 1
+                    print("uid_list_len: "+str(len(uid_list)))
+                    break
+                j = j + 1
+                print(j)        
+            
+            print("uid:" + uid)
+            fullaa = aaseq_from_uid(uid, substrate_turn, index)
+            print("fullaa_len: "+str(len(fullaa)))
+            if len(fullaa) < 28:
+                continue
+            index = index + 1
+            twenty_aa = get_negativedata_seq(fullaa, cleave_pattern)
+            #func2
+            aa_onezero()
+            
+            #func3
+            aa_charge()     
+            
+            #func4
+            aa_hypho()         
+            
+            #func5
+            p4 = cleave_point
+            add_secoundary_structure(uid, p4, twenty_aa)
+            
+            #func6
+            aa_properties(twenty_aa)                       
+            
+    substrate_turn = substrate_turn + 1
+    #print("The number of substrates that had multiple same cleavage sites: "+str(flag))
+    
+    #3.2
+    #create x_train about negative data
+    filename = filename.replace("trainingdata(positive)/", "")
+    path_w = "./preprocessed_data/preprocessed_trainingdata(negative)/preprocessed_" + filename
+    with open(path_w, mode='w') as f:
+        f.write(str(x_train))
+        f.write(str(len(x_train)))
+        f.write("\n")
+    with open(path_w) as f:
+        print(f.read())
+        
+    print("count")
+    print(count)
+    print("\n")
+    if len(filenames_posi)-1 == count:
+        #20
+        #when to start adding ""negative_data"".This bolock will be used untill the end. 
+        random.shuffle(x_train)
+        x_train_all = np.append(x_train_all, x_train, 0)
+        
+        y_train = np.array([[0.0, 1.0]]*aa_rows)
+        y_train_all = np.append(y_train_all, y_train, 0)
+        subs_sum = subs_sum + aa_rows
+        
+        #17
+        #since sencond time
+        #"positive_data", execute Stack to createt 5-cross validation list scince second time.
+        items = aa_rows // 5
+        for i in range(items):
+            xt = x_train_all[-1]
+            x_train_all = np.delete(x_train_all, -1, 0)
+            y_train_all = np.delete(y_train_all, -1, 0)
+            x_train_all_5crossval = np.append(x_train_all_5crossval, [xt], 0)
+            y_test = np.array([[0.0, 1.0]])
+            y_train_all_5crossval = np.append(y_train_all_5crossval, y_test, 0)
+        
+        #18
+        #At the end, create file that records aa_char_all and aa_hypho_all + y_train_char_all and y_train_hypho_all
+        filename = filename.replace("./trainingdata(popsitive)/", "")
+        path_w = "./preprocessed_data/preprocessed_all_data.txt"
+        with open(path_w, mode='w') as f:
+            f.write("x_train_all\n")
+            f.write(str(x_train_all)+"\n")
+            f.write(str(len(x_train_all))+"\n")
+            f.write("x_train_all_5crossval")
+            f.write(str(x_train_all_5crossval)+"\n")
+            f.write(str(len(x_train_all_5crossval))+"\n")
+            f.write("subs_sum: "+str(subs_sum)+"\n")
+            f.write("\n")
+        with open(path_w) as f:
+            print(f.read())
+            
+    else:
+        #20
+        #when to start adding ""negative_data"".This cell will be used untill the end. 
+        random.shuffle(x_train)
+        x_train_all = np.append(x_train_all, x_train, 0)
+        y_train = np.array([[0.0, 1.0]]*aa_rows)
+        y_train_all = np.append(y_train_all, y_train, 0)
+        subs_sum = subs_sum + aa_rows
+        
+        #17
+        #since sencond time
+        #"positive_data", execute Stack to createt 5-cross validation list scince second time.
+        items = aa_rows // 5
+        for i in range(items):
+            xt = x_train_all[-1]
+            x_train_all = np.delete(x_train_all, -1, 0)
+            y_train_all = np.delete(y_train_all, -1, 0)
+            x_train_all_5crossval = np.append(x_train_all_5crossval, [xt], 0)
+            y_test = np.array([[0.0, 1.0]])
+            y_train_all_5crossval = np.append(y_train_all_5crossval, y_test, 0)
+
+    count = count + 1
+print("consecutive_uid: "+str(consecutive_uid))
+print("END")
+
+
+print(x_train_all[0])
+
+print(len(x_train_all))
+print(len(y_train_all))
+print(len(x_train_all_5crossval))
+print(len(y_train_all_5crossval))
+
+print(x_train_all.shape)
+
+# saving numpy array(ndarray)
+np.save('./saving_numpy_array/x_train_all', x_train_all)
+np.save('./saving_numpy_array/y_train_all', y_train_all)
+np.save('./saving_numpy_array/x_train_all_5crossval', x_train_all_5crossval)
+np.save('./saving_numpy_array/y_train_all_5crossval', y_train_all_5crossval)
+
+#loding ndarray
+print(type(np.load('./saving_numpy_array/x_train_all.npy')))
+print(np.load('./saving_numpy_array/x_train_all.npy'))
+
+x_train_all = np.load('./saving_numpy_array/x_train_all.npy')
+y_train_all = np.load('./saving_numpy_array/y_train_all.npy')
+x_train_all_5crossval = np.load('./saving_numpy_array/x_train_all_5crossval.npy')
+y_train_all_5crossval = np.load('./saving_numpy_array/y_train_all_5crossval.npy')
+
+
+#31
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Dense, Activation, Flatten, Conv1D, Conv2D, MaxPooling2D, BatchNormalization, GlobalAveragePooling2D, Dropout
+from tensorflow.keras.utils import to_categorical
+import numpy as np
+import tensorflow as tf
+from tensorflow.keras.datasets import mnist, cifar10
+from tensorflow.keras.callbacks import ModelCheckpoint
+from tensorflow.keras.models import Model
+import datetime
+
+from tensorflow.keras.callbacks import EarlyStopping
+
+#Vurnum = 実験番号
+Vernum = 4
+
+import matplotlib.pyplot as plt
+
+#32
+x_train = x_train_all
+#正解変数: 今回のプロテアーゼがSpike protein を切断するなら、[1, 0]とする。
+y_train = y_train_all
+
+x_val = x_train_all_5crossval 
+y_val = y_train_all_5crossval 
+
+### add for TensorBoard
+import tensorflow.keras.callbacks
+#import tensorflow.keras.backend.tensorflow_backend as KTF
+import tensorflow.keras.backend as KTF
+import tensorflow as tf
+
+old_session = KTF.get_session()
+
+session = tf.Session('')
+KTF.set_session(session)
+KTF.set_learning_phase(1)
+
+#モデル構築
+model = Sequential()
+'''
+model.add(Conv2D(filters=5, kernel_size=(5, 5), strides=(1, 1), padding='valid', 
+                 data_format="channels_last", dilation_rate=(1, 1), activation='relu', 
+                 use_bias=True, input_shape=(20, 20, 3), kernel_initializer='glorot_uniform', 
+                 bias_initializer='zeros',  name='Conv2D_01'))
+model.add(MaxPooling2D(pool_size=(2, 2), strides=None, padding='valid', data_format=None, 
+                       name='MaxPooling2D_01'))
+model.add(Conv2D(filters=5, kernel_size=(3, 3), strides=(1, 1), padding='valid', 
+                 data_format="channels_last", dilation_rate=(1, 1), activation='relu', 
+                 use_bias=True, input_shape=(20, 20, 3), kernel_initializer='glorot_uniform', 
+                 bias_initializer='zeros',  name='Conv2D_02'))
+model.add(MaxPooling2D(pool_size=(2, 2), strides=None, padding='valid', data_format=None, 
+                       name='MaxPooling2D_02'))
+model.add(Flatten(name='Flatten_01'))
+'''
+#model.add(Dropout(0.5, noise_shape=None, seed=None))
+model.add(Dense(units=5, name='Dense01', activation='relu', input_shape=(20, 20, 3)))
+model.add(Dropout(0.5, noise_shape=None, seed=None))
+model.add(Dense(units=5, name='Dense02', activation='relu'))
+model.add(Dropout(0.5, noise_shape=None, seed=None))
+model.add(Dense(units=2, name='Dense_03'))
+model.add(Activation('softmax'))
+
+#モデルの構造を表示
+model.summary()
+
+#訓練（学習）プロセスの設定
+model.compile(optimizer='sgd', loss='categorical_crossentropy', metrics=['accuracy'])
+
+'''
+バリデーションロスが減少した場合に，各エポック終了後，モデルの重みを保存します
+'''
+#checkpointer = ModelCheckpoint(filepath='./weights.hdf5', verbose=0, save_best_only=True, save_format="h5")
+
+### add for TensorBoard
+erly_stpg = EarlyStopping(patience=10, verbose=1,monitor='val_loss' , mode = 'min') 
+chkfile = './callbacks/' + '{0:2d}'.format(Vernum)+'_{epoch:02d}-{val_loss:.4f}.hdf5' #format関数
+chck_pont = ModelCheckpoint(filepath = chkfile, monitor='val_loss', verbose=1, save_best_only=True, mode='min')
+
+log_dir = "log02/" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir=log_dir, histogram_freq=1)
+cbks=[tensorboard_callback]
+
+#訓練の実行 
+NUM_EPOCHS=11
+NUM_BATCH=45
+history = model.fit(x_train, y_train, batch_size=NUM_BATCH, epochs=NUM_EPOCHS, validation_split=0.2, shuffle = True ,
+                    callbacks=[erly_stpg , chck_pont], verbose = 0, )
+print(type(history))
+print(type(history.history))
+print(history.history.keys())
+print(history.history['loss'])
+print(history.history['acc'])
+print(history.history['val_loss'])
+print(history.history['val_acc'])
+
+plt.plot(range(1, NUM_EPOCHS+1), history.history['acc'], "-o")
+plt.plot(range(1, NUM_EPOCHS+1), history.history['val_acc'], "-o")
+plt.title('model accuracy')
+plt.ylabel('accuracy')  # Y軸ラベル
+plt.xlabel('epoch')  # X軸ラベル
+plt.grid()
+plt.legend(['acc', 'val_acc'], loc='best')
+#plt.xlim(0,NUM_EPOCHS)
+#plt.ylim(0.95,1.0)
+plt.show()
+
+plt.plot(range(1, NUM_EPOCHS+1), history.history['loss'], "-o")
+plt.plot(range(1, NUM_EPOCHS+1), history.history['val_loss'], "-o")
+plt.title('model loss')
+plt.ylabel('loss')  # Y軸ラベル
+plt.xlabel('epoch')  # X軸ラベル
+plt.grid()
+plt.legend(['loss', 'val_loss'], loc='best')
+#plt.xlim(0,NUM_EPOCHS)
+#plt.ylim(0.95,1.0)
+plt.show()
+
+
+loss, acc = model.evaluate(x_val, y_val, steps=None, verbose=0)
+print(f"Test Loss: {loss*100}%")
+print(f"Test Acc: {acc*100}%")
+
+### add for TensorBoard
+KTF.set_session(old_session)
+
+
+#prevent over fitting 
+#https://intellectual-curiosity.tokyo/2019/06/29/keras%E3%81%AB%E3%81%8A%E3%81%91%E3%82%8Btrain%E3%80%81validation%E3%80%81test%E3%81%AB%E3%81%A4%E3%81%84%E3%81%A6/
+# 学習実行
+BATCH_SIZE = 11
+NUM_EPOCHS = 128
+history = model.fit(x_train, y_train, batch_size=BATCH_SIZE, epochs=NUM_EPOCHS,
+          validation_split=0.2, validation_data=(x_val,y_val))
+model.summary()
+# グラフ描画
+# Accuracy
+plt.plot(range(1, NUM_EPOCHS+1), history.history['acc'], "-o")
+plt.plot(range(1, NUM_EPOCHS+1), history.history['val_acc'], "-o")
+plt.title('model accuracy')
+plt.ylabel('accuracy')  # Y軸ラベル
+plt.xlabel('epoch')  # X軸ラベル
+plt.grid()
+plt.legend(['acc', 'val_acc'], loc='best')
+plt.xlim(0,NUM_EPOCHS)
+plt.ylim(0.95,1.0)
+plt.show()
+
+weights = model.get_weights()
+print(weights)
+
+lay0 = model.layers[0] 
+
+print(lay0.get_weights())
+
+print(len(lay0.get_weights()[0][0][0]))
+
+lay1 = model.layers[1]
+print(lay1)
+print(lay1.get_weights())
+
+lay3 = model.layers[3]
+print(lay3)
+
+lay4 = model.layers[4]
+print(lay4)
+
+import os
+
+#saving the model.you can use the
+save_dir = "./model_saving/"
+model_name = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+if not os.path.isdir(save_dir):
+    os.makedirs(save_dir)
+model_path = os.path.join(save_dir, model_name)
+model.save(model_path)
+print('Saved trained model at %s ' % model_path)
+
+print(merops_code_list)
+
+
+merops_code_list = []
+with open('./testdata/Homo_sapiens_peptidases', 'r') as f:
+    row_list = f.read().split("\n")
+    print(row_list[0])
+    print(row_list[1])
+    for i in range(1, len(row_list)):
+        row = row_list[i].split("\t")
+        print(row[2])
+        if row[7] == "":
+            print("Locus is empty.")
+            print("-----------------------------------------------")
+            continue
+        merops_code_list.append(row[2])
+        print("----------------------------------------------")
+print(merops_code_list)
+print(len(merops_code_list))
+
+merops_code_mece = list(dict.fromkeys(merops_code_list))
+print(merops_code_mece)
+print(len(merops_code_mece))
+
+def aa_onezero_test():
+    for j in range(20):   
+        one_char_aa = twenty_aa[j]
+        if one_char_aa == "A":
+            x_test[i][2][j][0] = 1.0
+        elif one_char_aa == "C":
+            x_test[i][12][j][0] = 1.0
+        elif one_char_aa == "D":
+            x_test[i][15][j][0] = 1.0
+        elif one_char_aa == "E":
+            x_test[i][16][j][0] = 1.0
+        elif one_char_aa == "F":
+            x_test[i][7][j][0] = 1.0
+        elif one_char_aa == "G":
+            x_test[i][0][j][0] = 1.0
+        elif one_char_aa == "H":
+            x_test[i][19][j][0] = 1.0
+        elif one_char_aa == "I":
+            x_test[i][5][j][0] = 1.0
+        elif one_char_aa == "K":
+            x_test[i][17][j][0] = 1.0
+        elif one_char_aa == "L":
+            x_test[i][4][j][0] = 1.0
+        elif one_char_aa == "M":
+            x_test[i][6][j][0] = 1.0
+        elif one_char_aa == "N":
+            x_test[i][13][j][0] = 1.0
+        elif one_char_aa == "P":
+            x_test[i][1][j][0] = 1.0
+        elif one_char_aa == "Q":
+            x_test[i][14][j][0] = 1.0
+        elif one_char_aa == "R":
+            x_test[i][18][j][0] = 1.0
+        elif one_char_aa == "S":
+            x_test[i][10][j][0] = 1.0
+        elif one_char_aa == "T":
+            x_test[i][11][j][0] = 1.0
+        elif one_char_aa == "V":
+            x_test[i][3][j][0] = 1.0
+        elif one_char_aa == "W":
+            x_test[i][9][j][0] = 1.0
+        elif one_char_aa == "Y":
+            x_test[i][8][j][0] = 1.0
+        else:
+            pass
+
+
+
+def aa_charge_test():
+    for j in range(20):   
+        one_char_aa = twenty_aa[j]
+        if one_char_aa == "A":
+            x_test[i][2][j][1] = charge["A"]
+        elif one_char_aa == "C":
+            x_test[i][12][j][1] = charge["C"]
+        elif one_char_aa == "D":
+            x_test[i][15][j][1] = charge["D"]
+        elif one_char_aa == "E":
+            x_test[i][16][j][1] = charge["E"]
+        elif one_char_aa == "F":
+            x_test[i][7][j][1] = charge["F"]
+        elif one_char_aa == "G":
+            x_test[i][0][j][1] = charge["G"]
+        elif one_char_aa == "H":
+            x_test[i][19][j][1] = charge["H"]
+        elif one_char_aa == "I":
+            x_test[i][5][j][1] = charge["I"]
+        elif one_char_aa == "K":
+            x_test[i][17][j][1] = charge["K"]
+        elif one_char_aa == "L":
+            x_test[i][4][j][1] = charge["L"]
+        elif one_char_aa == "M":
+            x_test[i][6][j][1] = charge["M"]
+        elif one_char_aa == "N":
+            x_test[i][13][j][1] = charge["N"]
+        elif one_char_aa == "P":
+            x_test[i][1][j][1] = charge["P"]
+        elif one_char_aa == "Q":
+            x_test[i][14][j][1] = charge["Q"]
+        elif one_char_aa == "R":
+            x_test[i][18][j][1] = charge["R"]
+        elif one_char_aa == "S":
+            x_test[i][10][j][1] = charge["S"]
+        elif one_char_aa == "T":
+            x_test[i][11][j][1] = charge["T"]
+        elif one_char_aa == "V":
+            x_test[i][3][j][1] = charge["V"]
+        elif one_char_aa == "W":
+            x_test[i][9][j][1] = charge["W"]
+        elif one_char_aa == "Y":
+            x_test[i][8][j][1] = charge["Y"]
+        else:
+            pass
+
+def aa_hypho_test():
+    for j in range(20):
+        one_char_aa = twenty_aa[j]
+        if one_char_aa == "A":
+            x_test[i][2][j][2] = hydrophobicity["A"]
+        elif one_char_aa == "C":
+            x_test[i][12][j][2] = hydrophobicity["C"]
+        elif one_char_aa == "D":
+            x_test[i][15][j][2] = hydrophobicity["D"]
+        elif one_char_aa == "E":
+            x_test[i][16][j][2] = hydrophobicity["E"]
+        elif one_char_aa == "F":
+            x_test[i][7][j][2] = hydrophobicity["F"]
+        elif one_char_aa == "G":
+            x_test[i][0][j][2] = hydrophobicity["G"]
+        elif one_char_aa == "H":
+            x_test[i][19][j][2] = hydrophobicity["H"]
+        elif one_char_aa == "I":
+            x_test[i][5][j][2] = hydrophobicity["I"]
+        elif one_char_aa == "K":
+            x_test[i][17][j][2] = hydrophobicity["K"]
+        elif one_char_aa == "L":
+            x_test[i][4][j][2] = hydrophobicity["L"]
+        elif one_char_aa == "M":
+            x_test[i][6][j][2] = hydrophobicity["M"]
+        elif one_char_aa == "N":
+            x_test[i][13][j][2] = hydrophobicity["N"]
+        elif one_char_aa == "P":
+            x_test[i][1][j][2] = hydrophobicity["P"]
+        elif one_char_aa == "Q":
+            x_test[i][14][j][2] = hydrophobicity["Q"]
+        elif one_char_aa == "R":
+            x_test[i][18][j][2] = hydrophobicity["R"]
+        elif one_char_aa == "S":
+            x_test[i][10][j][2] = hydrophobicity["S"]
+        elif one_char_aa == "T":
+            x_test[i][11][j][2] = hydrophobicity["T"]
+        elif one_char_aa == "V":
+            x_test[i][3][j][2] = hydrophobicity["V"]
+        elif one_char_aa == "W":
+            x_test[i][9][j][2] = hydrophobicity["W"]
+        elif one_char_aa == "Y":
+            x_test[i][8][j][2] = hydrophobicity["Y"]
+        else:
+            pass    
+   
+   #define test data array 
+
+# 各アミノ酸について電荷と疎水性の値を定義
+charge = {"A":0., "C":-0.0735876, "D":-0.9994991, "E":-0.9987427, "F":0., "G":0., "H":0.0593509, "I":0.,
+          "K":0.9997489, "L":0., "M":0., "N":0., "P":0., "Q":0., "R":0.9999950, "S":0., "T":0., "V":0., "W":0., "Y":-0.0001995}
+hydrophobicity = {"A":0.1630295, "C":-0.2554557, "D":-0.9794608, "E":-0.7458280, "F":0.9152760,
+                  "G":-0.2554557, "H":-0.7869063, "I":0.8510911, "K":-0.8510911, "L":1.,
+                  "M":0.7227214, "N":-1., "P":-0.0860077, "Q":-0.8305520, "R":-0.7021823,
+                  "S":-0.4685494, "T":-0.3838254, "V":0.6816431, "W":0.8305520, "Y":0.5738126}
+'''
+subs_count = 0
+for i in range(len(merops_code_mece)):
+    count = 0
+    count = cur.execute("SELECT count(uniprot_acc) FROM cleavage where code=merops_code_mece[i]")
+    subs_count = subs_count + count
+print(subs_count)
+'''
+
+flag = 0
+subs_count_list = []
+for i in range(len(merops_code_mece)):
+    print("=============================protease "+str(i)+"===================================")
+    #define array that has 3 rank tensor with 3 channels about 1 or 0, charge and hydrophobicity.
+    #x_test = np.zeros([subs_count, 20, 20, 8])
+    #print(x_test)
+    #print("len(x_test):"+str(len(x_test))+"\n")
+    
+
+    #func1
+    #cleave_pattern = ""
+    #cleave_pattern = cptn()       
+    
+    
+    merops_code = [merops_code_mece[i]]
+    print("merops_code:" + merops_code_mece[i])
+    cur.execute("SELECT uniprot_acc, p1 FROM cleavage where code=(%s);", merops_code)
+    # 全てのデータを取得
+    subs = cur.fetchall()
+    for sub in subs:
+        print(sub)
+    x_test = np.zeros([len(subs), 20, 20, 3])
+    subs_count_list.append(len(subs))
+    print(subs_count_list)
+    
+    for j in range(len(subs)):
+        print("-----------------------protease "+str(i)+", substrate "+str(j)+"----------------------------")
+        uniprot_id = subs[j][0]
+        p1 = subs[j][1]
+        
+        fullaa = aaseq_from_uid(uniprot_id, i, j)
+        #print("fullaa_len: "+str(len(fullaa)))
+        #twenty_aa = get_20aa_at_cleavesite(fullaa, cleave_pattern)
+
+        #ここが今回は問題
+        cleave_point = p1-3
+        if cleave_point <= 6 and cleave_point < len(fullaa)-14:#左が問題，左端問題
+            twenty_aa = fullaa[0:20-(6-cleave_point)]
+            left_lack = 6 - cleave_point
+            twenty_aa = "-"*left_lack + twenty_aa
+        elif cleave_point > 6 and cleave_point >= len(fullaa)-14:#右が問題，右端問題
+            twenty_aa = fullaa[cleave_point-6:len(fullaa)]
+            right_lack = 6-(len(fullaa)-1 -(cleave_point-1)-8)
+            twenty_aa = twenty_aa + "-"*right_lack
+        elif cleave_point <= 6 and cleave_point >= len(fullaa)-14:#両端が問題
+            twenty_aa = fullaa[0:20]
+            left_lack = 6 - cleave_point
+            right_lack = 6-(len(fullaa)-1 -(cleave_point-1)-8)
+            twenty_aa = "-"*left_lack + twenty_aa + "-"*right_lack
+        elif cleave_point > 6 and cleave_point < len(fullaa)-14:
+            twenty_aa = fullaa[cleave_point-6:cleave_point-6+20]
+        else:
+            pass
+        print(twenty_aa)
+        
+        cleave_pattern = fullaa[cleave_point:cleave_point+8]
+        mpc = get_20aa_at_cleavesite_and_search_double_pattern(fullaa, cleave_pattern)
+        print("cleave_site_count: "+str(mpc))
+        if mpc  > 1:
+            flag = flag +1
+
+        #func2
+        aa_onezero_test()
+
+        #func3
+        aa_charge_test()
+
+        #func4
+        aa_hypho_test()
+
+    print("The number of substrates that had multiple same cleavage sites: "+str(flag))
+
+    if i == 0:
+        #12
+        #initialize
+        # "positive_data", first time
+        x_test_all=x_test
+        
+        #y_test_all=np.array([[1.0, 0.0]]*len(subs))
+        subs_sum=0
+        subs_sum = subs_sum + len(subs)
+        
+    elif i > 0 and i != len(merops_code_mece)-1:
+        #13.2
+        #since second time
+        #"test_data", since second time.
+        x_test_all = np.append(x_test_all, x_test, 0)
+        
+        #y_test = np.array([[1.0, 0.0]]*len(subs))
+        #y_test_all = np.append(y_test_all, y_test, 0)
+        subs_sum = subs_sum + len(subs)
+    elif i == len(merops_code_mece):
+        #14
+        #last time
+        #"test_data", since second time.
+        x_test_all = np.append(x_test_all, x_test, 0)
+        
+        #y_test = np.array([[1.0, 0.0]]*len(subs))
+        #y_test_all = np.append(y_test_all, y_test, 0)
+        subs_sum = subs_sum + len(subs)
+        print("subs_sum: "+str(subs_sum))
+        #18
+        #At the end, create file that records aa_char_all and aa_hypho_all + y_train_char_all and y_train_hypho_all
+        filename="substrates_of_homo_sapiens_peptidases_seq"
+        path_w = "./preprocessed_data/preprocessed_testdata/preprocessed_" + filename
+        with open(path_w, mode='w') as f:
+            f.write(str("x_test"))
+            f.write("\n")
+            f.write(str(x_test))
+            f.write("\n")
+            f.write(str(len(x_test)))
+            f.write("\n")
+            f.write("subs_sum: "+str(subs_sum)+"\n")
+        with open(path_w) as f:
+            print(f.read())
+    else:
+        pass
+print("END")
+
+
+print(x_test)
+print(x_test_all)
+
+
+np.save("./testdata/saving_ndarray/x_test_all")
+np.save("./testdata/saving_ndarray/y_test_all")
+
+x_test_all = np.load("./testdata/saving_ndarray/x_test_all")
+y_test_all = np.load("./testdata/saving_ndarray/y_test_all")
+
+predict_list = model.predict(x_test_all)
+
+df = pd.DataFrame(predict_list, columns=['cleavage', 'non-cleavage'])
+
+import matplotlib.pyplot as plt
+
+x = df['cleavage']
+y = df['non-cleavage']
+plt.scatter(x, y, s=20, c=None, marker='o')
+plt.xlabel("the probability of cleavage")
+plt.ylabel("the probability of non-cleavage ")
+
+from tensorflow.keras.utils import plot_model
+plot_model(model, to_file='model.png')
+
+# Plot training & validation accuracy values
+plt.plot(history.history['acc'])
+plt.plot(history.history['val_acc'])
+plt.title('Model accuracy')
+plt.ylabel('Accuracy')
+plt.xlabel('Epoch')
+plt.legend(['Train', 'Test'], loc='upper left')
+plt.show()
+
+# Plot training & validation loss values
+plt.plot(history.history['loss'])
+plt.plot(history.history['val_loss'])
+plt.title('Model loss')
+plt.ylabel('Loss')
+plt.xlabel('Epoch')
+plt.legend(['Train', 'Test'], loc='upper left')
+plt.show()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
