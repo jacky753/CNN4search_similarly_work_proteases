@@ -1,0 +1,201 @@
+#2.1
+#define positive data array 
+
+# 各アミノ酸について電荷と疎水性の値を定義
+charge = {"A":0., "C":-0.0735876, "D":-0.9994991, "E":-0.9987427, "F":0., "G":0., "H":0.0593509, "I":0.,
+          "K":0.9997489, "L":0., "M":0., "N":0., "P":0., "Q":0., "R":0.9999950, "S":0., "T":0., "V":0., "W":0., "Y":-0.0001995}
+hydrophobicity = {"A":0.1630295, "C":-0.2554557, "D":-0.9794608, "E":-0.7458280, "F":0.9152760,
+                  "G":-0.2554557, "H":-0.7869063, "I":0.8510911, "K":-0.8510911, "L":1.,
+                  "M":0.7227214, "N":-1., "P":-0.0860077, "Q":-0.8305520, "R":-0.7021823,
+                  "S":-0.4685494, "T":-0.3838254, "V":0.6816431, "W":0.8305520, "Y":0.5738126}
+count = 0
+protease_turn = 0
+index = 0
+consecutive_uid = 0
+uid_list = []
+flag = 0
+
+for filename in filenames_posi:
+    #filename = "./trainingdata(positive)/" + filename
+    print("==================================protease"+str(count)+"=======================================")
+    with open(filename, 'r') as f:
+        row_list = f.read().split("\n")
+        p4num = 0
+        aa_row = 0
+        aa_row_last = 0
+        print("row_list"+str(row_list)+"\n")
+        for i in range(len(row_list)):
+        #    if row_list[i][0] == "Substrate":
+            if re.search(r'Substrate\t', row_list[i]):
+                row = row_list[i].split("\t")
+                print("row"+str(row)+"\n")
+                for j in range(len(row)):
+                    if row[j] == "P4":
+                        p4num = j
+                        print("p4num:"+str(p4num)+"\n")
+                        break
+                aa_row = i + 1
+                print("aa_row:"+str(aa_row)+"\n")
+                break
+
+        for i in range(aa_row, len(row_list)):
+            if len(row_list[i])==0:
+                pass 
+            else:
+                aa_row_last = i
+        print("aa_row_last:"+str(aa_row_last)+"\n")
+
+        aa_rows = aa_row_last - aa_row + 1
+        print("aa_rows:"+str(aa_rows)+"\n")
+        #define array that has 3 rank tensor with 3 channels about 1 or 0, charge and hydrophobicity.
+        x_train = np.zeros([aa_rows, 20, 20, 15])
+        #print(x_train)
+        print("len(x_train):"+str(len(x_train))+"\n")
+
+        for i in range(aa_rows):
+            row = row_list[aa_row + i].split("\t")
+            
+            print("-------------------protease "+str()+"substrate"+str(i)+"=================")
+            #func1
+            cleave_pattern = ""
+            cleave_pattern = cptn()       
+            
+            print("row[0]: " + row[0])
+            print("row[1]: " + row[1])
+
+            #uidを抽出
+            if re.search(r'^([A-Z]){1}([0-9]){5}', row[0]):
+                uid = row[0]
+            elif re.search(r'^([A-Z]){1}([0-9]){5}', row[1]):
+                uid = row[1]
+            else:
+                uid = "null"
+                continue
+                
+            uid_list = []
+            uid = str(uid)
+            uid_list.append(uid)
+            j = 1
+            while 1:
+                if aa_row+i+j == len(row_list):
+                    break
+                print(uid_list)
+                next_uid = str(row_list[aa_row+i+j])
+                if uid == next_uid:
+                    uid_list.append(next_uid)
+                    consecutive_uid = consecutive_uid + 1
+                    print(uid_list)
+                else:
+                    skipp = len(uid_list) - 1
+                    print("uid_list_len: "+str(len(uid_list)))
+                    break
+                j = j + 1
+                print(j)
+        
+            print("uid:" + uid)
+            fullaa = aaseq_from_uid(uid, protease_turn, i)
+            print("fullaa_len: "+str(len(fullaa)))
+            index = index + 1
+            
+            twenty_aa, p4 = get_20aa_at_cleavesite(fullaa, cleave_pattern)
+            print("p4"+str(p4))
+            
+            
+            mpc = get_20aa_at_cleavesite_and_search_double_pattern(fullaa, cleave_pattern)
+            print("cleave_site_count: "+str(mpc))
+            if mpc  > 1:
+                flag = flag +1
+            
+            #func2
+            aa_onezero()
+            
+            #func3
+            aa_charge()
+            
+            #func4
+            aa_hypho()
+            
+            
+            #func5
+            #p4 = cleave_point
+            add_secoundary_structure(uid, p4, twenty_aa)
+            
+            #func6
+            aa_properties(twenty_aa)
+            
+            
+    protease_turn = protease_turn + 1
+    print("The number of substrates that had multiple same cleavage sites: "+str(flag))
+    
+    #3.1
+    #create x_train positive file.
+    filename = filename.replace("trainingdata(positive)/", "")
+    path_w = "./preprocessed_data/preprocessed_trainingdata(positive)/preprocessed_" + filename
+
+    with open(path_w, mode='w') as f:
+        f.write(str(x_train))
+        f.write(str(len(x_train)))
+        f.write("\n")
+    with open(path_w) as f:
+        print(f.read())
+    print("count")
+    print(count)
+    print("\n")
+    
+    if count == 0:
+        #12
+        #initialize
+        # "positive_data", first time
+        random.shuffle(x_train)
+        x_train_all=x_train
+        
+        y_train_all=np.array([[1.0, 0.0]]*aa_rows)
+        subs_sum=0
+        subs_sum = subs_sum + aa_rows
+        
+        #14
+        #initialize
+        #5-cross validation list at first time. "positive_data"
+        items = aa_rows // 5
+        print("aa_rows//5: "+str(items)+"\n")
+        x_train_all_5crossval = np.zeros([items, 20, 20, 3])
+        y_train_all_5crossval  = np.array([[1.0, 0.0]]*items)
+        
+        #16
+        #initialize
+        #"positive_data", execute Stack to createt 5-cross validation list at first time.
+        items = aa_rows // 5
+        #aa_rows = aa_rows - items
+        for i in range(items):
+            x_train_all_5crossval[i] = x_train_all[-1]
+            x_train_all = np.delete(x_train_all, -1, 0)
+            y_train_all = np.delete(y_train_all, -1, 0)
+        
+    else:
+        #13.2
+        #since second time
+        #"positive_data", since second time.
+        random.shuffle(x_train)
+        x_train_all = np.append(x_train_all, x_train, 0)
+        
+        y_train = np.array([[1.0, 0.0]]*aa_rows)
+        y_train_all = np.append(y_train_all, y_train, 0)
+        subs_sum = subs_sum + aa_rows
+        
+        #17
+        #since sencond time
+        #"positive_data", execute Stack to createt 5-cross validation list scince second time.
+        items = aa_rows // 5
+        #aa_rows = aa_rows - items
+        for i in range(items):
+            xt = x_train_all[-1]
+            x_train_all = np.delete(x_train_all, -1, 0)
+            y_train_all = np.delete(y_train_all, -1, 0)
+            x_train_all_5crossval = np.append(x_train_all_5crossval, [xt], 0)
+            y_train = np.array([[1.0, 0.0]])
+            y_train_all_5crossval = np.append(y_train_all_5crossval, y_train, 0)
+
+    count = count + 1
+print("consecutive_uid: "+str(consecutive_uid))
+
+print("END")
